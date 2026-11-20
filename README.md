@@ -140,7 +140,7 @@ nothing. Build-time data does not leak: `cloud-init clean --seed` removes the bu
 You can easily build it by yourself, prerequisites:
 - Linux with KVM, root
 - Packer
-- Qemu (`qemu-system-amd64 qemu-utils guestfs-tools cloud-image-utils`)
+- Qemu (`qemu-system-amd64 qemu-utils cloud-image-utils`)
 - `sudo ./build.sh [TEMPLATE_NAME]` (e.g. `sudo ./build.sh ubuntu-24-contabo`)
 - Result: `templates/<name>/output/<name>_zfs.qcow2` (zstd-compressed)
 

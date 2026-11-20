@@ -40,7 +40,10 @@ jobs:
             sleep 5
           done
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            qemu-system-amd64 qemu-utils guestfs-tools cloud-image-utils
+            qemu-system-amd64 qemu-utils
+      - name: Install cloud-image-utils (genisoimage for the cidata ISO)
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y cloud-image-utils
       - name: Build image ${{ matrix.ubuntu-release }}
         run: sudo ./build.sh ${{ matrix.ubuntu-release }}
       - name: Save artifacts
