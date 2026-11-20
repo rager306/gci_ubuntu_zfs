@@ -141,6 +141,21 @@ nothing. Build-time data does not leak: `cloud-init clean --seed` removes the bu
 - The `ubuntu` user with password `ubuntu` is kept for the Contabo VNC console only
   (emergency access; SSH passwords are off). Lock it with `passwd -l ubuntu` if unwanted.
 
+### Maintenance baked in
+
+- **Host firewall**: ufw, default-deny incoming with SSH allowed, pre-enabled (rules are
+  seeded at build time; the firewall comes up on first boot). Complements the free
+  network-level [Contabo firewall](https://contabo.com/blog/contabo-firewall-is-here-free-with-every-vps-and-vds)
+  (panel-managed, IPv4+IPv6) — use both.
+- **Automatic snapshots**: `zfs-auto-snapshot` (15min×4, hourly×24, daily×31, weekly×8,
+  monthly×12); datasets with `com.sun:auto-snapshot=false` (`/tmp`, caches, docker, …) are
+  skipped. Manual pre-upgrade snapshot: `zfs snapshot -r rpool@before-$(date +%F-%H%M)`.
+- **Monthly pool scrub**: `zfs-scrub-monthly@rpool.timer`; the pool also has `autotrim=on`.
+- **Security updates**: `unattended-upgrades` (Ubuntu cloud images enable it by default).
+- **QEMU guest agent** installed for clean host-side VM management.
+- **No swap** by design: 48 GiB RAM with a 12 GiB ARC cap; swap on ZFS (dataset or zvol)
+  is still a supported-but-risky path on Linux.
+
 ### Known specifics
 
 - SSH host keys are baked at build time and shared by every deployment of the same image.
@@ -175,7 +190,9 @@ Checklist:
 3. Make the **cloud-init toggle green** on the VPS → **Reinstall** → select the image,
    boot type **legacy** (SeaBIOS).
 4. (Optional) paste cloud-init user-data — it will run on the first boot.
-5. Log in: `ssh -i <key> root@<server-ip>`.
+5. (Recommended) enable the free Contabo firewall in the panel (SSH/needed ports only);
+   the image's ufw already defaults to deny-incoming with SSH allowed.
+6. Log in: `ssh -i <key> root@<server-ip>`.
 
 Post-install verification:
 

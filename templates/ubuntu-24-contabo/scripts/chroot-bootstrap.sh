@@ -152,6 +152,26 @@ ExecStart=/usr/local/sbin/expand-rpool.sh
 WantedBy=multi-user.target
 UNITEOF
 systemctl enable zpool-expand.service
+
+# --- Maintenance & hardening (Ubuntu/KVM best practices) ---
+# QEMU guest agent: lets the virtualization host manage the VM cleanly;
+# unattended-upgrades: security updates (on by default in cloud images,
+# kept explicit); zfs-auto-snapshot: honours the com.sun:auto-snapshot
+# properties set by prepare-zfs-root.sh; ufw: host firewall.
+apt-get install -y qemu-guest-agent unattended-upgrades zfs-auto-snapshot ufw
+
+# Firewall: default-deny incoming, allow SSH. Only rule files are
+# written here ("ufw allow" loads nothing into the kernel — "ufw enable"
+# inside the build chroot would firewall the build VM itself and cut
+# Packer's SSH); ENABLED=yes brings it up on the first boot. This
+# complements the free network-level Contabo firewall (panel-managed).
+ufw allow OpenSSH
+sed -i 's/^ENABLED=no/ENABLED=yes/' /etc/ufw/ufw.conf
+
+# Monthly scrub (shipped disabled); zfs-auto-snapshot ships its own
+# cron schedule: frequent 15min/4, hourly/24, daily/31, weekly/8,
+# monthly/12, skipping datasets with auto-snapshot=false.
+systemctl enable zfs-scrub-monthly@rpool.timer
 # --- END Contabo customization ---
 
 update-initramfs -c -k all
