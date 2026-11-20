@@ -97,7 +97,9 @@ mount --make-private --rbind /proc /mnt/proc
 mount --make-private --rbind /sys  /mnt/sys
 
 cp /tmp/contabo.conf /mnt/tmp/contabo.conf
-cp /tmp/chroot-bootstrap.sh /mnt/tmp/chroot-bootstrap.sh
+# install -m 755: the exec bit does not survive web-UI uploads, and
+# chroot executes this file directly
+install -m 755 /tmp/chroot-bootstrap.sh /mnt/tmp/chroot-bootstrap.sh
 chroot /mnt /tmp/chroot-bootstrap.sh
 rm -f /mnt/tmp/chroot-bootstrap.sh /mnt/tmp/contabo.conf
 
