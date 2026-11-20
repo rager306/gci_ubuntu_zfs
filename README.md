@@ -7,12 +7,10 @@ It's still a little bit complicated to have Linux with ZFS as root file system, 
 
 > **_NOTE:_**  This image doesn't use any of `zsys` mechanisms.
 
-Two Packer templates live in `templates/`:
-
-| Template | Purpose |
-|---|---|
-| `ubuntu-24` | Upstream generic image (kept unchanged) |
-| `ubuntu-24-contabo` | The focus of this fork: Ubuntu 24.04 root-on-ZFS ready to deploy on a Contabo Cloud VPS/VDS via **Custom Images** |
+The single Packer template, `templates/ubuntu-24-contabo`, builds an Ubuntu 24.04 root-on-ZFS
+image ready to deploy on a Contabo Cloud VPS/VDS via **Custom Images**. The generic upstream
+`ubuntu-24` template was dropped from this fork — generic images live in
+[infraguys/gci_ubuntu_zfs](https://github.com/infraguys/gci_ubuntu_zfs).
 
 ## Why ZFS for the root filesystem?
 
@@ -157,7 +155,7 @@ You can easily build it by yourself, prerequisites:
 - Linux with KVM, root
 - Packer
 - Qemu (`qemu-system-amd64 qemu-utils cloud-image-utils`)
-- `sudo ./build.sh [TEMPLATE_NAME]` (e.g. `sudo ./build.sh ubuntu-24-contabo`)
+- `sudo ./build.sh` (defaults to the `ubuntu-24-contabo` template)
 - Result: `templates/<name>/output/<name>_zfs.qcow2` (zstd-compressed)
 
 **CI:** a push builds the matrix via Github Actions and uploads the artifact

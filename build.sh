@@ -20,7 +20,7 @@ set -eu
 set -x
 set -o pipefail
 
-RELEASE="${1:-ubuntu-24}"
+RELEASE="${1:-ubuntu-24-contabo}"
 echo "Will build: $RELEASE"
 
 TARGET_IMAGE="./output/${RELEASE}-zfs.qcow2-1"
