@@ -63,6 +63,12 @@ variable "contabo_ssh_key" {
   description = "Public SSH key allowed to log in as root"
 }
 
+variable "contabo_root_password" {
+  type        = string
+  description = "Optional root password for the VNC console (SSH stays key-only); empty = keep locked"
+  default     = ""
+}
+
 variable "contabo_arc_max_bytes" {
   type        = string
   description = "ZFS ARC limit in bytes (written to modprobe.d before update-initramfs)"
@@ -108,6 +114,7 @@ build {
 			dns      = join(", ", var.contabo_dns)
 			hostname = var.contabo_hostname
 			ssh_key  = var.contabo_ssh_key
+			root_password = var.contabo_root_password
 			arc_max  = var.contabo_arc_max_bytes
 		})
 		destination = "/tmp/contabo.conf"

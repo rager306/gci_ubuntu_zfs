@@ -20,5 +20,9 @@ contabo_hostname = "vmi1234567"
 # Public key allowed to log in as root (single line: type + key + comment)
 contabo_ssh_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@example.com"
 
+# Optional root password for the Contabo VNC console (SSH stays key-only).
+# Empty = root password stays locked (use the ubuntu console account instead).
+contabo_root_password = ""
+
 # ZFS ARC limit in bytes
 contabo_arc_max_bytes = "12884901888"

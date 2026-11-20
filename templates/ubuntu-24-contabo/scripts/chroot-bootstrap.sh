@@ -111,6 +111,24 @@ PasswordAuthentication no
 KbdInteractiveAuthentication no
 SSHEOF
 
+# Optional root password: for the Contabo VNC console only; SSH stays
+# key-only (PermitRootLogin prohibit-password, passwords disabled).
+if [ -n "${CONTABO_ROOT_PASSWORD:-}" ]; then
+    { set +x; } 2>/dev/null      # never trace the password into the build log
+    printf 'root:%s\n' "$CONTABO_ROOT_PASSWORD" | chpasswd
+    set -x
+fi
+
+# Serial console: kernel + GRUB output on both VGA and ttyS0, getty on
+# ttyS0 (Contabo VNC rescue + CI smoke boot asserts on the serial log)
+sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="/&console=tty0 console=ttyS0,115200n8 /' /etc/default/grub
+if grep -q '^GRUB_TERMINAL=' /etc/default/grub; then
+    sed -i 's/^GRUB_TERMINAL=.*/GRUB_TERMINAL="console serial"/' /etc/default/grub
+else
+    printf 'GRUB_TERMINAL="console serial"\n' >> /etc/default/grub
+fi
+systemctl enable serial-getty@ttyS0.service
+
 # First-boot: grow rpool to fill the whole system disk.
 # Contabo exposes the disk via virtio_scsi (/dev/sda*), but the device
 # is detected at runtime, so any naming works (sdX, vdX, nvme, mmcblk).
@@ -123,18 +141,33 @@ MARK=/var/lib/.rpool-expanded
 
 zpool set autoexpand=on rpool
 
-# Partition rpool lives on, straight from the pool itself
+# Partition rpool lives on, straight from the pool itself. zpool may
+# report a stable alias (/dev/disk/by-*); resolve it to the kernel name
+# for parsing, keep the original for zpool online (it must match the
+# path recorded in the pool configuration).
 member=$(zpool status -LP rpool | awk '$1 ~ /^\/dev\// {print $1; exit}')
-case "$member" in
+kmember=$(readlink -f "$member")
+case "$kmember" in
     */nvme*n*p[0-9]*|*/mmcblk*p[0-9]*)
-        disk="${member%p*}"; partnum="${member##*p}" ;;
+        disk="${kmember%p*}"; partnum="${kmember##*p}" ;;
     *)
-        disk="${member%%[0-9]*}"; partnum="${member##*[!0-9]}" ;;
+        disk="${kmember%%[0-9]*}"; partnum="${kmember##*[!0-9]}" ;;
 esac
 
-growpart "$disk" "$partnum"
+# growpart: 0 = grown, 1 = NOCHANGE (already grown), anything else = fail
+rc=0; growpart "$disk" "$partnum" || rc=$?
+[ "$rc" -eq 0 ] || [ "$rc" -eq 1 ] || exit 1
 partprobe "$disk" 2>/dev/null || partx --update "$disk" || true
-zpool online -e rpool "$member" || true
+
+# A failure here must retry on the next boot, not mark expansion done
+zpool online -e rpool "$member"
+
+# Confirm the pool actually consumed the space before disabling the unit
+exp=$(zpool list -Ho expandsize rpool)
+if [ "$exp" != "-" ]; then
+    echo "rpool still has pending expansion (expandsize=$exp)" >&2
+    exit 1
+fi
 
 touch "$MARK"
 systemctl disable zpool-expand.service >/dev/null 2>&1 || true
@@ -179,9 +212,6 @@ update-grub
 grub-install /dev/vdb
 
 # Cleanup
-# Shell history
-history -c
-
 # Cloud-init clean
 sudo cloud-init clean --log --seed
 

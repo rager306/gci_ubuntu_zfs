@@ -11,9 +11,11 @@ permissions:
 
 jobs:
   build_n_publish:
+    runs-on: ubuntu-24.04
     # Pinned: ubuntu-latest moved to a newer image where installing
     # qemu-system fails with unmet dependencies (apt exit code 100).
-    runs-on: ubuntu-24.04
+    # Hard cap so a wedged apt lock or hung QEMU cannot burn 6 hours.
+    timeout-minutes: 60
     strategy:
       fail-fast: true
       matrix:
@@ -37,16 +39,34 @@ jobs:
             sleep 15
           done
           [ "$ok" = 1 ]
+          waited=0
           while sudo fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1; do
+            if [ "$waited" -ge 300 ]; then
+              echo "::error::apt locks still held after ${waited}s, giving up"
+              exit 1
+            fi
             echo "waiting for apt locks to be released"
             sleep 5
+            waited=$((waited + 5))
           done
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             qemu-system-amd64 qemu-utils
       - name: Install cloud-image-utils (genisoimage for the cidata ISO)
         run: |
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y cloud-image-utils
+      - name: Check Contabo secrets
+        id: cfg
+        env:
+          CONTABO_IPV4: ${{ secrets.CONTABO_IPV4 }}
+        run: |
+          if [ -n "$CONTABO_IPV4" ]; then
+            echo "secrets_ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "secrets_ok=false" >> "$GITHUB_OUTPUT"
+            echo '::notice::CONTABO_* repository secrets are not set - skipping the Contabo image build. See README: Build parameters.'
+          fi
       - name: Render contabo.auto.pkrvars.hcl from repo secrets
+        if: steps.cfg.outputs.secrets_ok == 'true'
         env:
           CONTABO_IPV4: ${{ secrets.CONTABO_IPV4 }}
           CONTABO_IPV4_GATEWAY: ${{ secrets.CONTABO_IPV4_GATEWAY }}
@@ -55,40 +75,71 @@ jobs:
           CONTABO_DNS: ${{ secrets.CONTABO_DNS }}
           CONTABO_HOSTNAME: ${{ secrets.CONTABO_HOSTNAME }}
           CONTABO_SSH_KEY: ${{ secrets.CONTABO_SSH_KEY }}
+          CONTABO_ROOT_PASSWORD: ${{ secrets.CONTABO_ROOT_PASSWORD }}
           CONTABO_ARC_MAX_BYTES: ${{ secrets.CONTABO_ARC_MAX_BYTES }}
         run: |
           missing=0
-          for v in CONTABO_IPV4 CONTABO_IPV4_GATEWAY CONTABO_IPV6 CONTABO_IPV6_GATEWAY \
-                   CONTABO_DNS CONTABO_HOSTNAME CONTABO_SSH_KEY CONTABO_ARC_MAX_BYTES; do
+          for v in CONTABO_IPV4 CONTABO_IPV4_GATEWAY CONTABO_DNS \
+                   CONTABO_HOSTNAME CONTABO_SSH_KEY CONTABO_ARC_MAX_BYTES; do
             [ -n "${!v}" ] || { echo "::error::repository secret $v is not set"; missing=1; }
           done
+          # IPv6 is optional (empty = IPv4-only build), but a set IPv6
+          # address requires its gateway.
+          if [ -n "${CONTABO_IPV6:-}" ] && [ -z "${CONTABO_IPV6_GATEWAY:-}" ]; then
+            echo "::error::CONTABO_IPV6_GATEWAY is required when CONTABO_IPV6 is set"
+            missing=1
+          fi
           [ "$missing" = 0 ]
           esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
           {
             echo "contabo_ipv4 = \"$(esc "$CONTABO_IPV4")\""
             echo "contabo_ipv4_gateway = \"$(esc "$CONTABO_IPV4_GATEWAY")\""
-            echo "contabo_ipv6 = \"$(esc "$CONTABO_IPV6")\""
-            echo "contabo_ipv6_gateway = \"$(esc "$CONTABO_IPV6_GATEWAY")\""
-            echo "contabo_dns = $CONTABO_DNS"
+            echo "contabo_ipv6 = \"$(esc "${CONTABO_IPV6:-}")\""
+            echo "contabo_ipv6_gateway = \"$(esc "${CONTABO_IPV6_GATEWAY:-}")\""
+            echo "contabo_dns = ${CONTABO_DNS}"
             echo "contabo_hostname = \"$(esc "$CONTABO_HOSTNAME")\""
             echo "contabo_ssh_key = \"$(esc "$CONTABO_SSH_KEY")\""
+            echo "contabo_root_password = \"$(esc "${CONTABO_ROOT_PASSWORD:-}")\""
             echo "contabo_arc_max_bytes = \"$(esc "$CONTABO_ARC_MAX_BYTES")\""
-          } > "templates/${{ matrix.ubuntu-release }}/contabo.ci.auto.pkrvars.hcl"
+          } > "templates/${{ matrix.ubuntu-release }}/contabo.auto.pkrvars.hcl"
       - name: Validate Packer template
+        if: steps.cfg.outputs.secrets_ok == 'true'
         run: |
           cd "templates/${{ matrix.ubuntu-release }}"
           packer init ./
           packer validate ./
       - name: Build image ${{ matrix.ubuntu-release }}
+        if: steps.cfg.outputs.secrets_ok == 'true'
         run: sudo ./build.sh ${{ matrix.ubuntu-release }}
+      - name: Smoke boot image (BIOS/QEMU, serial console, 8G disk)
+        if: steps.cfg.outputs.secrets_ok == 'true'
+        timeout-minutes: 10
+        run: |
+          set -eu
+          REL="${{ matrix.ubuntu-release }}"
+          IMG="templates/$REL/output/${REL}_zfs.qcow2"
+          cp "$IMG" /tmp/smoke.qcow2
+          # A larger disk exercises the zpool-expand first-boot path
+          qemu-img resize /tmp/smoke.qcow2 8G
+          KVM=""
+          [ -w /dev/kvm ] && KVM="-enable-kvm -cpu host"
+          set +e
+          timeout 360 qemu-system-x86_64 $KVM -m 2048 -smp 2 \
+            -drive file=/tmp/smoke.qcow2,if=virtio,format=qcow2,cache=unsafe \
+            -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+            -display none -serial stdio -no-reboot > /tmp/serial.log 2>&1
+          set -e
+          echo "--- serial log tail ---"
+          tail -40 /tmp/serial.log
+          grep -q 'login:' /tmp/serial.log
       - name: Save artifacts
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/') && steps.cfg.outputs.secrets_ok == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.ubuntu-release }}-qcow2
           path: templates/${{ matrix.ubuntu-release }}/output/${{ matrix.ubuntu-release }}_zfs.qcow2
       - name: Publish image (for tags only)
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/') && steps.cfg.outputs.secrets_ok == 'true' }}
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}

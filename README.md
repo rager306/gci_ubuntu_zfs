@@ -47,8 +47,11 @@ Generic `ubuntu-24` images built from the unmodified template are available from
 
 ## Customize
 
-If you don't want to build image locally - just fork and push changes,
-Github Actions will build image and add it as a build artifact.
+If you don't want to build image locally - fork and push changes, Github Actions will
+build the image and add it as a build artifact. **Fork owners must first set the
+`CONTABO_*` repository secrets** (Settings -> Secrets and variables -> Actions, table
+above): without them CI skips the Contabo build with a notice. `CONTABO_IPV6`,
+`CONTABO_IPV6_GATEWAY` (IPv4-only builds) and `CONTABO_ROOT_PASSWORD` are optional.
 
 ## Build parameters (Contabo template)
 
@@ -68,6 +71,7 @@ to `contabo.auto.pkrvars.hcl` and fill in the real values from the Contabo panel
 | `CONTABO_DNS` | `["8.8.8.8", "1.1.1.1"]` (HCL list literal) |
 | `CONTABO_HOSTNAME` | `vmi1234567` |
 | `CONTABO_SSH_KEY` | `ssh-ed25519 AAAA... you@example.com` |
+| `CONTABO_ROOT_PASSWORD` | *(optional, empty = locked)* |
 | `CONTABO_ARC_MAX_BYTES` | `12884901888` |
 
 | Variable | Example | Description |
@@ -79,6 +83,7 @@ to `contabo.auto.pkrvars.hcl` and fill in the real values from the Contabo panel
 | `contabo_dns` | `[8.8.8.8, 1.1.1.1]` | Resolvers |
 | `contabo_hostname` | `vmi1234567` | Hostname baked into the image |
 | `contabo_ssh_key` | ed25519 key | Public key allowed to log in as root |
+| `contabo_root_password` | *(empty)* | Optional root password for the Contabo VNC console; empty = keep locked (SSH stays key-only either way) |
 | `contabo_arc_max_bytes` | `12884901888` (12 GiB) | ZFS ARC limit |
 
 Examples use RFC 5737/3849 documentation ranges — real values never belong in the repository.
@@ -139,7 +144,8 @@ nothing. Build-time data does not leak: `cloud-init clean --seed` removes the bu
   (which is removed as well).
 - `/etc/machine-id` is reset at build time — every deployment gets its own.
 - The `ubuntu` user with password `ubuntu` is kept for the Contabo VNC console only
-  (emergency access; SSH passwords are off). Lock it with `passwd -l ubuntu` if unwanted.
+  (emergency access; SSH passwords are off). Lock it with `passwd -l ubuntu` if unwanted —
+  and/or set `CONTABO_ROOT_PASSWORD` to log in to the console as root instead.
 
 ### Maintenance baked in
 
@@ -158,8 +164,9 @@ nothing. Build-time data does not leak: `cloud-init clean --seed` removes the bu
 
 ### Known specifics
 
-- SSH host keys are baked at build time and shared by every deployment of the same image.
-  Regenerate after first boot:
+- SSH host keys are **not** baked: the published disk never boots during the build (its
+  `/etc/ssh` comes from the pristine cloud image), and cloud-init regenerates host keys
+  per instance. Verify uniqueness after the first deploy regardless; manual fallback:
   `rm /etc/ssh/ssh_host_* && dpkg-reconfigure openssh-server && systemctl restart ssh`.
 - Legacy/SeaBIOS boot only (no UEFI bootloader installed).
 - `recordsize` is default everywhere; `/tmp` and docker datasets are excluded from auto-snapshots.
@@ -173,9 +180,11 @@ You can easily build it by yourself, prerequisites:
 - `sudo ./build.sh` (defaults to the `ubuntu-24-contabo` template)
 - Result: `templates/<name>/output/<name>_zfs.qcow2` (zstd-compressed)
 
-**CI:** a push builds the matrix via Github Actions and uploads the artifact
-`ubuntu-24-contabo-qcow2` (kept ~90 days). Pushing a **tag** (e.g. `v1`) publishes a Release with
-the asset `ubuntu-24-contabo_zfs.qcow2` — its URL can be handed to Contabo Custom Images directly.
+**CI:** a push builds the matrix via Github Actions, smoke-boots the produced qcow2 under QEMU
+(BIOS boot, 8G disk, serial console must reach `login:` — this also exercises the zpool-expand
+first-boot path) and uploads the artifact `ubuntu-24-contabo-qcow2` (kept ~90 days). Pushing a
+**tag** publishes a Release with the asset `ubuntu-24-contabo_zfs.qcow2` — its URL can be handed
+to Contabo Custom Images directly.
 
 ## Deploying to Contabo
 
