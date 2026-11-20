@@ -1,5 +1,7 @@
 # Ubuntu Cloud Images with Root on ZFS
 
+<p align="center"><img src="docs/banner.svg" alt="Ubuntu Server root on ZFS"></p>
+
 Fork of [infraguys/gci_ubuntu_zfs](https://github.com/infraguys/gci_ubuntu_zfs).
 It's still a little bit complicated to have Linux with ZFS as root file system, so let's build one!
 
@@ -11,6 +13,27 @@ Two Packer templates live in `templates/`:
 |---|---|
 | `ubuntu-24` | Upstream generic image (kept unchanged) |
 | `ubuntu-24-contabo` | The focus of this fork: Ubuntu 24.04 root-on-ZFS ready to deploy on a Contabo Cloud VPS/VDS via **Custom Images** |
+
+## Why ZFS for the root filesystem?
+
+A short answer for anyone landing here: ZFS turns the root filesystem into something you can
+snapshot, verify and replicate as a whole, which plain ext4 cannot do.
+
+- **Instant snapshots & rollbacks** — snapshot the entire system before an `apt upgrade` or any
+  risky change (`zfs snapshot -r rpool@before`), and roll back in seconds — even from the
+  initramfs if the new state does not boot.
+- **End-to-end data integrity** — every block is checksummed (Merkle tree); a periodic
+  `zpool scrub` detects and repairs silent bit rot — a real thing on cheap VPS storage.
+- **Transparent compression** — `compression=lz4` costs almost nothing in CPU and typically
+  saves 30–50% of disk space.
+- **Per-dataset properties** — `/var`, `/tmp`, docker etc. are separate datasets with their own
+  policies: `sync=disabled` on `/tmp`, no auto-snapshots for caches, custom `recordsize` for
+  databases later.
+- **Efficient backups** — `zfs send | zfs receive` gives incremental, block-level, consistent
+  replication to another host.
+
+Trade-offs to be aware of: the ARC cache eats RAM (capped here at 12 GiB), and metadata-heavy
+workloads run slightly slower than on ext4. `zsys` is not used — just plain OpenZFS datasets.
 
 ## Motivation
 
