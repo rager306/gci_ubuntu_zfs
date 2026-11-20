@@ -24,7 +24,51 @@ variable output_directory {
   default = "./output"
 }
 
-source "qemu" "ubuntu-24-zfs" {
+# --- Contabo-specific values, see contabo.auto.pkrvars.hcl ---
+
+variable "contabo_ipv4" {
+  type        = string
+  description = "Main IPv4 with prefix length, e.g. 164.68.106.228/24"
+}
+
+variable "contabo_ipv4_gateway" {
+  type        = string
+  description = "IPv4 default gateway"
+}
+
+variable "contabo_ipv6" {
+  type        = string
+  description = "Main IPv6 with prefix length, empty string for an IPv4-only instance"
+  default     = ""
+}
+
+variable "contabo_ipv6_gateway" {
+  type        = string
+  description = "IPv6 default gateway, usually the link-local fe80::1"
+  default     = "fe80::1"
+}
+
+variable "contabo_dns" {
+  type        = list(string)
+  description = "Resolver addresses"
+}
+
+variable "contabo_hostname" {
+  type        = string
+  description = "Hostname baked into the image"
+}
+
+variable "contabo_ssh_key" {
+  type        = string
+  description = "Public SSH key allowed to log in as root"
+}
+
+variable "contabo_arc_max_bytes" {
+  type        = string
+  description = "ZFS ARC limit in bytes (written to modprobe.d before update-initramfs)"
+}
+
+source "qemu" "ubuntu-24-contabo-zfs" {
   iso_url                   = "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
   iso_checksum              = "file:https://cloud-images.ubuntu.com/releases/24.04/release/SHA256SUMS"
   accelerator               = "kvm"
@@ -53,7 +97,21 @@ source "qemu" "ubuntu-24-zfs" {
 }
 
 build {
-  sources = ["source.qemu.ubuntu-24-zfs"]
+  sources = ["source.qemu.ubuntu-24-contabo-zfs"]
+
+	provisioner "file" {
+		content = templatefile("files/contabo.conf.tpl", {
+			ipv4     = var.contabo_ipv4
+			ipv4_gw  = var.contabo_ipv4_gateway
+			ipv6     = var.contabo_ipv6
+			ipv6_gw  = var.contabo_ipv6_gateway
+			dns      = join(", ", var.contabo_dns)
+			hostname = var.contabo_hostname
+			ssh_key  = var.contabo_ssh_key
+			arc_max  = var.contabo_arc_max_bytes
+		})
+		destination = "/tmp/contabo.conf"
+	}
 
 	provisioner "file" {
 		source = "files/zfs-growpart-root.cfg"

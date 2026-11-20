@@ -6,7 +6,6 @@ on:
 env:
   PACKER_VERSION: "latest"
 
-# TODO: we may create separate `publish` job in future
 permissions:
   contents: write
 
@@ -16,7 +15,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        ubuntu-release: ["ubuntu-24"]
+        ubuntu-release: ["ubuntu-24-contabo"]
     name: Build Image for ${{ matrix.ubuntu-release }}
     steps:
       - name: Checkout
@@ -35,7 +34,7 @@ jobs:
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.ubuntu-release }} qcow2 image
+          name: ${{ matrix.ubuntu-release }}-qcow2
           path: templates/${{ matrix.ubuntu-release }}/output/${{ matrix.ubuntu-release }}_zfs.qcow2
       - name: Publish image (for tags only)
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
@@ -46,4 +45,4 @@ jobs:
           asset_name: ${{ matrix.ubuntu-release }}_zfs.qcow2
           tag: ${{ github.ref }}
           overwrite: true
-          body: "Ubuntu cloud image with root-on-zfs."
+          body: "Ubuntu 24.04 root-on-ZFS for Contabo (SeaBIOS, static netplan, baked ssh key)."

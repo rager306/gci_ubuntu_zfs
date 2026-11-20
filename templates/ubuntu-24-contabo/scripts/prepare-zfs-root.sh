@@ -96,9 +96,10 @@ mount --make-private --rbind /dev  /mnt/dev
 mount --make-private --rbind /proc /mnt/proc
 mount --make-private --rbind /sys  /mnt/sys
 
+cp /tmp/contabo.conf /mnt/tmp/contabo.conf
 cp /tmp/chroot-bootstrap.sh /mnt/tmp/chroot-bootstrap.sh
 chroot /mnt /tmp/chroot-bootstrap.sh
-rm -f /mnt/tmp/chroot-bootstrap.sh
+rm -f /mnt/tmp/chroot-bootstrap.sh /mnt/tmp/contabo.conf
 
 umount /mnt/boot/efi
 fstrim /mnt/boot/

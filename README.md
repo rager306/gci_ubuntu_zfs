@@ -1,9 +1,16 @@
 # Ubuntu Cloud Images with Root on ZFS
 
-It's still a little bit complicated to have Linux with ZFS as root file system,
-so let's build one!
+Fork of [infraguys/gci_ubuntu_zfs](https://github.com/infraguys/gci_ubuntu_zfs).
+It's still a little bit complicated to have Linux with ZFS as root file system, so let's build one!
 
 > **_NOTE:_**  This image doesn't use any of `zsys` mechanisms.
+
+Two Packer templates live in `templates/`:
+
+| Template | Purpose |
+|---|---|
+| `ubuntu-24` | Upstream generic image (kept unchanged) |
+| `ubuntu-24-contabo` | The focus of this fork: Ubuntu 24.04 root-on-ZFS ready to deploy on a Contabo Cloud VPS/VDS via **Custom Images** |
 
 ## Motivation
 
@@ -12,18 +19,136 @@ So, you'll have nearly vanilla Ubuntu server image, but with ZFS :)
 
 ## Use
 
-Get [latest release image](https://github.com/infraguys/gci_ubuntu_zfs/releases/latest/download/ubuntu-24_zfs.qcow2), or see all [Github releases](https://github.com/infraguys/gci_ubuntu_zfs/releases) for already built qcow2 images (zstd-compressed).
+Contabo image (this fork): [latest release asset](https://github.com/rager306/gci_ubuntu_zfs/releases/latest/download/ubuntu-24-contabo_zfs.qcow2)
+(qcow2, zstd-compressed), or see all [Github releases](https://github.com/rager306/gci_ubuntu_zfs/releases).
+Generic `ubuntu-24` images built from the unmodified template are available from the
+[upstream releases](https://github.com/infraguys/gci_ubuntu_zfs/releases).
 
 ## Customize
 
-If you don't want to build image locally - just fork and push changes, Github Actions will build image and add it as a build artifact.
+If you don't want to build image locally - just fork and push changes,
+Github Actions will build image and add it as a build artifact.
+
+## Build parameters (Contabo template)
+
+All Contabo-specific values live in a single file,
+[`templates/ubuntu-24-contabo/contabo.auto.pkrvars.hcl`](templates/ubuntu-24-contabo/contabo.auto.pkrvars.hcl)
+(auto-loaded by Packer). Take the network values from the Contabo panel: *Server details → IP data*.
+
+| Variable | Default | Description |
+|---|---|---|
+| `contabo_ipv4` | `164.68.106.228/24` | Main IPv4 with prefix length |
+| `contabo_ipv4_gateway` | `164.68.106.1` | IPv4 default gateway |
+| `contabo_ipv6` | `2a02:c207:2292:9903::1/64` | Main IPv6; set `""` for an IPv4-only config |
+| `contabo_ipv6_gateway` | `fe80::1` | IPv6 gateway (link-local, hence `scope: link`) |
+| `contabo_dns` | `[8.8.8.8, 1.1.1.1]` | Resolvers |
+| `contabo_hostname` | `vmi2929903` | Hostname baked into the image |
+| `contabo_ssh_key` | ed25519 key | Public key allowed to log in as root |
+| `contabo_arc_max_bytes` | `12884901888` (12 GiB) | ZFS ARC limit |
+
+Override by editing the pkrvars file, adding your own `*.auto.pkrvars.hcl`, setting
+`PKR_VAR_contabo_ipv4=...`-style environment variables, or passing `-var` / `-var-file` to `packer build`.
+
+Rendering chain: pkrvars → `files/contabo.conf.tpl` (templatefile) → `/tmp/contabo.conf` in the
+chroot → sourced by `chroot-bootstrap.sh` with `:?` checks, so an empty value fails the build
+instead of failing in production.
+
+## What the Contabo template bakes in
+
+| Area | Upstream `ubuntu-24` | `ubuntu-24-contabo` |
+|---|---|---|
+| Network | generic cloud-init/DHCP | baked static netplan (IPv4+IPv6, v6 GW `fe80::1`) |
+| cloud-init | vanilla | network config disabled; **NoCloud kept** — panel/API user-data works |
+| Access | ubuntu/ubuntu | root key-only; SSH password auth disabled |
+| Pool size | 3.5G, manual grow | `rpool` auto-grows to the whole disk on first boot |
+| ZFS ARC | default (½ RAM) | limit set via variable, lands in initramfs |
+
+### Image internals
+
+- Source is the official [ubuntu-24.04-server-cloudimg-amd64.img](https://cloud-images.ubuntu.com/releases/24.04/release/)
+  (checksum verified by Packer); the system is moved onto ZFS with `rsync` — nearly vanilla Ubuntu.
+- GPT disk, same as the cloud image: `p1` — ZFS root, `p14` — BIOS boot, `p15` — ESP, `p16` — `/boot`.
+  Bootloader is GRUB in the MBR + BIOS boot partition, i.e. **legacy (SeaBIOS)** boot.
+  `dd`-copied boot partitions keep their UUIDs, so the `/boot` and `/boot/efi` fstab entries stay valid.
+- Kernel cmdline: `root=ZFS=rpool/ROOT/ubuntu init_on_alloc=0 init_on_free=0`;
+  `zfs-initramfs` in the initramfs imports the pool by name (`zpool.cache` is not used — the image
+  is portable across device names).
+- First boot: `zpool-expand.service` detects the actual disk from `zpool status -LP` (works for
+  `sdX`/`vdX`/`nvme`/`mmcblk`; Contabo exposes virtio_scsi = `/dev/sda*`), runs `growpart` +
+  `zpool online -e` so the pool fills the whole VPS disk, then marks itself done and disables.
+
+### Networking
+
+- `/etc/netplan/01-contabo.yaml`: the NIC is matched by `e*` and renamed to `nic0` (independent of
+  the interface name), static IPv4+IPv6, IPv6 gateway `fe80::1` with `scope: link`.
+  The config is validated by `netplan generate` at build time.
+- cloud-init is forbidden from touching the network (`network: {config: disabled}`) — otherwise it
+  would clobber the baked config with a DHCP fallback, and Contabo offers no DHCP for custom images.
+- The IPv6 part is omitted when `contabo_ipv6` is empty.
+
+### cloud-init user-data
+
+`datasource_list: [ NoCloud, None ]` is kept: the official Contabo way to configure an instance is
+cloud-init user-data — the textarea in the panel on **Reinstall** (with the cloud-init toggle green),
+or the `user_data` field in the API / Terraform provider. It is applied on the first boot
+(packages, users, runcmd...). Without a config drive cloud-init falls back to `None` and runs
+nothing. Build-time data does not leak: `cloud-init clean --seed` removes the build seed directory.
+
+### Security
+
+- root login is key-only (`PermitRootLogin prohibit-password`); password and keyboard-interactive
+  SSH auth are disabled globally via the `00-contabo.conf` drop-in. sshd uses the **first** value
+  obtained per keyword, so the drop-in must sort before cloud-init's `50-cloud-init.conf`
+  (which is removed as well).
+- `/etc/machine-id` is reset at build time — every deployment gets its own.
+- The `ubuntu` user with password `ubuntu` is kept for the Contabo VNC console only
+  (emergency access; SSH passwords are off). Lock it with `passwd -l ubuntu` if unwanted.
+
+### Known specifics
+
+- SSH host keys are baked at build time and shared by every deployment of the same image.
+  Regenerate after first boot:
+  `rm /etc/ssh/ssh_host_* && dpkg-reconfigure openssh-server && systemctl restart ssh`.
+- Legacy/SeaBIOS boot only (no UEFI bootloader installed).
+- `recordsize` is default everywhere; `/tmp` and docker datasets are excluded from auto-snapshots.
 
 ## Build
 
 You can easily build it by yourself, prerequisites:
+- Linux with KVM, root
 - Packer
 - Qemu (`qemu-system-amd64 qemu-utils guestfs-tools cloud-image-utils`)
-- `./build.sh [TEMPLATE_NAME]`
+- `sudo ./build.sh [TEMPLATE_NAME]` (e.g. `sudo ./build.sh ubuntu-24-contabo`)
+- Result: `templates/<name>/output/<name>_zfs.qcow2` (zstd-compressed)
+
+**CI:** a push builds the matrix via Github Actions and uploads the artifact
+`ubuntu-24-contabo-qcow2` (kept ~90 days). Pushing a **tag** (e.g. `v1`) publishes a Release with
+the asset `ubuntu-24-contabo_zfs.qcow2` — its URL can be handed to Contabo Custom Images directly.
+
+## Deploying to Contabo
+
+Contabo custom image requirements: qcow2 (internal compression is fine — this build is zstd;
+archive-style compression like `.gz` is not), x86-64, virtio (`virtio_scsi` for the disk,
+`virtio_net` for networking) — all present in the Ubuntu cloud kernel.
+
+Checklist:
+
+1. Push a tag → Release → copy the asset URL (or use the Actions artifact).
+2. Panel → **Custom Images → Add custom image** → paste the URL.
+3. Make the **cloud-init toggle green** on the VPS → **Reinstall** → select the image,
+   boot type **legacy** (SeaBIOS).
+4. (Optional) paste cloud-init user-data — it will run on the first boot.
+5. Log in: `ssh -i <key> root@164.68.106.228`.
+
+Post-install verification:
+
+```bash
+zpool list rpool                                  # SIZE ≈ the whole VPS disk
+zfs list -o name,mountpoint,used                  # layout as documented below
+systemctl status zpool-expand.service             # inactive/disabled after success
+cat /sys/module/zfs/parameters/zfs_arc_max        # 12884901888
+ip -br a show nic0                                 # both addresses
+```
 
 ## Dataset layout example
 
@@ -51,13 +176,17 @@ rpool/var/spool         25K  7.41G    25K  /var/spool
 rpool/var/tmp           36K  7.41G    36K  /var/tmp
 ```
 
-## Dataset properties:
+## Dataset properties
+
 - `recordsize` is default on every dataset, may be optimized in future (for ex. for some databases)
 - whole pool has:
-  - `compression=on`
+  - `compression=lz4`
   - `xattr=sa`
+  - `dnodesize=auto`
+  - `acltype=posixacl`
   - `atime=off`
+  - `autotrim=on`
 - Some non-mission-critical datasets have `com.sun:auto-snapshot=false`
-- `rpool/tmp` have `sync=disabled` ([programs must not assume that any files or directories in /tmp are preserved between invocations of the program](https://refspecs.linuxfoundation.org/FHS_3.0/fhs/ch03s18.html))
+- `rpool/tmp` has `sync=disabled` ([programs must not assume that any files or directories in /tmp are preserved between invocations of the program](https://refspecs.linuxfoundation.org/FHS_3.0/fhs/ch03s18.html))
 
 (See `prepare-zfs-root.sh` for exact create commands)

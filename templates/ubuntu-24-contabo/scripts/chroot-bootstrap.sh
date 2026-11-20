@@ -38,19 +38,42 @@ sed -i '/LABEL=cloudimg-rootfs/d' /etc/fstab
 
 sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="/&root=ZFS=rpool\/ROOT\/ubuntu init_on_alloc=0 init_on_free=0 /' /etc/default/grub
 # --- BEGIN Contabo customization ---
-echo vmi2929903 > /etc/hostname
-sed -i '/vmi2929903/d' /etc/hosts
-sed -i '1i127.0.1.1 vmi2929903 vmi2929903' /etc/hosts
+# All values are rendered by Packer into /tmp/contabo.conf
+# (see files/contabo.conf.tpl and contabo.auto.pkrvars.hcl).
+. /tmp/contabo.conf
+: "${CONTABO_IPV4:?}" "${CONTABO_IPV4_GW:?}" "${CONTABO_DNS:?}" \
+  "${CONTABO_HOSTNAME:?}" "${CONTABO_SSH_KEY:?}" "${CONTABO_ARC_MAX:?}"
+if [ -n "$CONTABO_IPV6" ]; then : "${CONTABO_IPV6_GW:?}"; fi
 
-# Disable cloud-init network + datasource (we bake static netplan below)
+echo "$CONTABO_HOSTNAME" > /etc/hostname
+sed -i "/$CONTABO_HOSTNAME/d" /etc/hosts
+sed -i "1i127.0.1.1 $CONTABO_HOSTNAME $CONTABO_HOSTNAME" /etc/hosts
+
+# cloud-init: never touch the network (static netplan is baked below),
+# but keep NoCloud so the official Contabo flow works: user-data pasted in
+# the panel on Reinstall (or API user_data / Terraform) is applied on
+# first boot. None = fallback when no config drive is attached.
 cat > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg <<'NETEOF'
 network: {config: disabled}
 NETEOF
 cat > /etc/cloud/cloud.cfg.d/90-datasources.cfg <<'DSEOF'
-datasource_list: [ None ]
+datasource_list: [ NoCloud, None ]
 DSEOF
 
-cat > /etc/netplan/01-contabo.yaml <<'NPEOF'
+# Static network. IPv6 parts are appended only when the address is set.
+addr_block="        - ${CONTABO_IPV4}"
+route_block="        - to: default
+          via: ${CONTABO_IPV4_GW}"
+if [ -n "$CONTABO_IPV6" ]; then
+    addr_block="$addr_block
+        - ${CONTABO_IPV6}"
+    route_block="$route_block
+        - to: default
+          via: ${CONTABO_IPV6_GW}
+          scope: link"
+fi
+
+cat > /etc/netplan/01-contabo.yaml <<NPEOF
 network:
   version: 2
   ethernets:
@@ -59,54 +82,67 @@ network:
         name: "e*"
       set-name: nic0
       addresses:
-        - 164.68.106.228/24
-        - 2a02:c207:2292:9903::1/64
+${addr_block}
       routes:
-        - to: default
-          via: 164.68.106.1
-        - to: default
-          via: fe80::1
-          scope: link
+${route_block}
       nameservers:
-        addresses: [8.8.8.8, 1.1.1.1]
+        addresses: [${CONTABO_DNS}]
 NPEOF
 chmod 600 /etc/netplan/01-contabo.yaml
+# Fail the build early if the generated netplan is invalid
+netplan generate
 
-# ZFS ARC limit (48G RAM host)
-cat > /etc/modprobe.d/zfs.conf <<'ZFSEOF'
-options zfs zfs_arc_max=12884901888
+# ZFS ARC limit
+cat > /etc/modprobe.d/zfs.conf <<ZFSEOF
+options zfs zfs_arc_max=${CONTABO_ARC_MAX}
 ZFSEOF
 
-# SSH: key-only root login
+# SSH: key-only auth. sshd uses the FIRST value obtained for a keyword
+# and sshd_config.d drop-ins are read in lexical order, so ours must sort
+# before cloud-init's 50-cloud-init.conf (PasswordAuthentication yes from
+# the build); remove that file as well.
 install -d -m 700 /root/.ssh
-cat > /root/.ssh/authorized_keys <<'PUBEOF'
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJt9f8RyvEMGx2ZmzFrNs80a1FJ/Wx3QEod2D69A1n3P lan\acc16@acc16
-PUBEOF
+printf '%s\n' "$CONTABO_SSH_KEY" > /root/.ssh/authorized_keys
 chmod 600 /root/.ssh/authorized_keys
-cat > /etc/ssh/sshd_config.d/99-contabo.conf <<'SSHEOF'
+rm -f /etc/ssh/sshd_config.d/50-cloud-init.conf
+cat > /etc/ssh/sshd_config.d/00-contabo.conf <<'SSHEOF'
 PermitRootLogin prohibit-password
 PasswordAuthentication no
+KbdInteractiveAuthentication no
 SSHEOF
 
-# First-boot: expand rpool to the whole Contabo disk (/dev/sda, 400G)
-apt-get install -y cloud-guest-utils
+# First-boot: grow rpool to fill the whole system disk.
+# Contabo exposes the disk via virtio_scsi (/dev/sda*), but the device
+# is detected at runtime, so any naming works (sdX, vdX, nvme, mmcblk).
+apt-get install -y cloud-guest-utils parted
 cat > /usr/local/sbin/expand-rpool.sh <<'EXPEOF'
 #!/bin/bash
 set -eu
 MARK=/var/lib/.rpool-expanded
 [ -e "$MARK" ] && exit 0
-zpool set autoexpand=on rpool || true
-growpart /dev/sda 1 || true
-partprobe /dev/sda || true
-zpool online -e rpool /dev/sda1 || true
+
 zpool set autoexpand=on rpool
+
+# Partition rpool lives on, straight from the pool itself
+member=$(zpool status -LP rpool | awk '$1 ~ /^\/dev\// {print $1; exit}')
+case "$member" in
+    */nvme*n*p[0-9]*|*/mmcblk*p[0-9]*)
+        disk="${member%p*}"; partnum="${member##*p}" ;;
+    *)
+        disk="${member%%[0-9]*}"; partnum="${member##*[!0-9]}" ;;
+esac
+
+growpart "$disk" "$partnum"
+partprobe "$disk" 2>/dev/null || partx --update "$disk" || true
+zpool online -e rpool "$member" || true
+
 touch "$MARK"
 systemctl disable zpool-expand.service >/dev/null 2>&1 || true
 EXPEOF
 chmod +x /usr/local/sbin/expand-rpool.sh
 cat > /etc/systemd/system/zpool-expand.service <<'UNITEOF'
 [Unit]
-Description=Expand rpool to fill the whole Contabo disk
+Description=Expand rpool to fill the whole system disk
 ConditionPathExists=!/var/lib/.rpool-expanded
 After=zfs-mount.service
 [Service]
@@ -128,6 +164,10 @@ history -c
 
 # Cloud-init clean
 sudo cloud-init clean --log --seed
+
+# Fresh machine-id per deployment (systemd regenerates it on boot)
+rm -f /etc/machine-id
+touch /etc/machine-id
 
 # Cleanup apt cache
 apt-get -y autoremove --purge
