@@ -28,7 +28,7 @@ variable output_directory {
 
 variable "contabo_ipv4" {
   type        = string
-  description = "Main IPv4 with prefix length, e.g. 164.68.106.228/24"
+  description = "Main IPv4 with prefix length, e.g. 203.0.113.10/24"
 }
 
 variable "contabo_ipv4_gateway" {

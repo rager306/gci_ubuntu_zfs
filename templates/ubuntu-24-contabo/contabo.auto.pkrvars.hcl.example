@@ -1,0 +1,24 @@
+# Contabo-specific values baked into the image.
+# Copy this file to contabo.auto.pkrvars.hcl (git-ignored), fill in the
+# real values from the Contabo panel (Server details -> IP data).
+# In CI the same values come from repository secrets (see the workflow).
+
+# Main IPv4 with prefix length
+contabo_ipv4 = "203.0.113.10/24"
+contabo_ipv4_gateway = "203.0.113.1"
+
+# Main IPv6 with prefix length; set to "" for an IPv4-only instance
+contabo_ipv6 = "2001:db8:42::1/64"
+# Contabo uses a link-local gateway, hence "scope: link" in the netplan
+contabo_ipv6_gateway = "fe80::1"
+
+# HCL list literal
+contabo_dns = ["8.8.8.8", "1.1.1.1"]
+
+contabo_hostname = "vmi1234567"
+
+# Public key allowed to log in as root (single line: type + key + comment)
+contabo_ssh_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@example.com"
+
+# ZFS ARC limit in bytes
+contabo_arc_max_bytes = "12884901888"

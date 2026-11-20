@@ -46,6 +46,34 @@ jobs:
       - name: Install cloud-image-utils (genisoimage for the cidata ISO)
         run: |
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y cloud-image-utils
+      - name: Render contabo.auto.pkrvars.hcl from repo secrets
+        env:
+          CONTABO_IPV4: ${{ secrets.CONTABO_IPV4 }}
+          CONTABO_IPV4_GATEWAY: ${{ secrets.CONTABO_IPV4_GATEWAY }}
+          CONTABO_IPV6: ${{ secrets.CONTABO_IPV6 }}
+          CONTABO_IPV6_GATEWAY: ${{ secrets.CONTABO_IPV6_GATEWAY }}
+          CONTABO_DNS: ${{ secrets.CONTABO_DNS }}
+          CONTABO_HOSTNAME: ${{ secrets.CONTABO_HOSTNAME }}
+          CONTABO_SSH_KEY: ${{ secrets.CONTABO_SSH_KEY }}
+          CONTABO_ARC_MAX_BYTES: ${{ secrets.CONTABO_ARC_MAX_BYTES }}
+        run: |
+          missing=0
+          for v in CONTABO_IPV4 CONTABO_IPV4_GATEWAY CONTABO_IPV6 CONTABO_IPV6_GATEWAY \
+                   CONTABO_DNS CONTABO_HOSTNAME CONTABO_SSH_KEY CONTABO_ARC_MAX_BYTES; do
+            [ -n "${!v}" ] || { echo "::error::repository secret $v is not set"; missing=1; }
+          done
+          [ "$missing" = 0 ]
+          esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+          {
+            echo "contabo_ipv4 = \"$(esc "$CONTABO_IPV4")\""
+            echo "contabo_ipv4_gateway = \"$(esc "$CONTABO_IPV4_GATEWAY")\""
+            echo "contabo_ipv6 = \"$(esc "$CONTABO_IPV6")\""
+            echo "contabo_ipv6_gateway = \"$(esc "$CONTABO_IPV6_GATEWAY")\""
+            echo "contabo_dns = $CONTABO_DNS"
+            echo "contabo_hostname = \"$(esc "$CONTABO_HOSTNAME")\""
+            echo "contabo_ssh_key = \"$(esc "$CONTABO_SSH_KEY")\""
+            echo "contabo_arc_max_bytes = \"$(esc "$CONTABO_ARC_MAX_BYTES")\""
+          } > "templates/${{ matrix.ubuntu-release }}/contabo.ci.auto.pkrvars.hcl"
       - name: Build image ${{ matrix.ubuntu-release }}
         run: sudo ./build.sh ${{ matrix.ubuntu-release }}
       - name: Save artifacts

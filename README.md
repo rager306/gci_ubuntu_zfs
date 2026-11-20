@@ -54,20 +54,36 @@ Github Actions will build image and add it as a build artifact.
 
 ## Build parameters (Contabo template)
 
-All Contabo-specific values live in a single file,
-[`templates/ubuntu-24-contabo/contabo.auto.pkrvars.hcl`](templates/ubuntu-24-contabo/contabo.auto.pkrvars.hcl)
-(auto-loaded by Packer). Take the network values from the Contabo panel: *Server details → IP data*.
+All Contabo-specific values live in a Packer var-file `contabo.auto.pkrvars.hcl` (auto-loaded by
+Packer, **git-ignored**). Copy the committed
+[`contabo.auto.pkrvars.hcl.example`](templates/ubuntu-24-contabo/contabo.auto.pkrvars.hcl.example)
+to `contabo.auto.pkrvars.hcl` and fill in the real values from the Contabo panel
+(*Server details → IP data*). In CI the same values are rendered from **repository secrets**
+(Settings → Secrets and variables → Actions):
 
-| Variable | Default | Description |
+| Secret | Example |
+|---|---|
+| `CONTABO_IPV4` | `203.0.113.10/24` |
+| `CONTABO_IPV4_GATEWAY` | `203.0.113.1` |
+| `CONTABO_IPV6` | `2001:db8:42::1/64` (or empty for IPv4-only) |
+| `CONTABO_IPV6_GATEWAY` | `fe80::1` |
+| `CONTABO_DNS` | `["8.8.8.8", "1.1.1.1"]` (HCL list literal) |
+| `CONTABO_HOSTNAME` | `vmi1234567` |
+| `CONTABO_SSH_KEY` | `ssh-ed25519 AAAA... you@example.com` |
+| `CONTABO_ARC_MAX_BYTES` | `12884901888` |
+
+| Variable | Example | Description |
 |---|---|---|
-| `contabo_ipv4` | `164.68.106.228/24` | Main IPv4 with prefix length |
-| `contabo_ipv4_gateway` | `164.68.106.1` | IPv4 default gateway |
-| `contabo_ipv6` | `2a02:c207:2292:9903::1/64` | Main IPv6; set `""` for an IPv4-only config |
+| `contabo_ipv4` | `203.0.113.10/24` | Main IPv4 with prefix length |
+| `contabo_ipv4_gateway` | `203.0.113.1` | IPv4 default gateway |
+| `contabo_ipv6` | `2001:db8:42::1/64` | Main IPv6; set `""` for an IPv4-only config |
 | `contabo_ipv6_gateway` | `fe80::1` | IPv6 gateway (link-local, hence `scope: link`) |
 | `contabo_dns` | `[8.8.8.8, 1.1.1.1]` | Resolvers |
-| `contabo_hostname` | `vmi2929903` | Hostname baked into the image |
+| `contabo_hostname` | `vmi1234567` | Hostname baked into the image |
 | `contabo_ssh_key` | ed25519 key | Public key allowed to log in as root |
 | `contabo_arc_max_bytes` | `12884901888` (12 GiB) | ZFS ARC limit |
+
+Examples use RFC 5737/3849 documentation ranges — real values never belong in the repository.
 
 Override by editing the pkrvars file, adding your own `*.auto.pkrvars.hcl`, setting
 `PKR_VAR_contabo_ipv4=...`-style environment variables, or passing `-var` / `-var-file` to `packer build`.
@@ -161,7 +177,7 @@ Checklist:
 3. Make the **cloud-init toggle green** on the VPS → **Reinstall** → select the image,
    boot type **legacy** (SeaBIOS).
 4. (Optional) paste cloud-init user-data — it will run on the first boot.
-5. Log in: `ssh -i <key> root@164.68.106.228`.
+5. Log in: `ssh -i <key> root@<server-ip>`.
 
 Post-install verification:
 
