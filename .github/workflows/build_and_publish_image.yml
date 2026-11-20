@@ -11,7 +11,9 @@ permissions:
 
 jobs:
   build_n_publish:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to a newer image where installing
+    # qemu-system fails with unmet dependencies (apt exit code 100).
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: true
       matrix:
