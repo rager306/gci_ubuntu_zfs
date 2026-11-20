@@ -104,12 +104,18 @@ jobs:
           } > "templates/${{ matrix.ubuntu-release }}/contabo.auto.pkrvars.hcl"
       - name: Validate Packer template
         if: steps.cfg.outputs.secrets_ok == 'true'
+        env:
+          # authenticated GitHub API for plugin downloads (avoids
+          # anonymous rate limits during packer init)
+          PACKER_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd "templates/${{ matrix.ubuntu-release }}"
           packer init ./
           packer validate ./
       - name: Build image ${{ matrix.ubuntu-release }}
         if: steps.cfg.outputs.secrets_ok == 'true'
+        env:
+          PACKER_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: sudo ./build.sh ${{ matrix.ubuntu-release }}
       - name: Smoke boot image (BIOS/QEMU, serial console, 8G disk)
         if: steps.cfg.outputs.secrets_ok == 'true'
