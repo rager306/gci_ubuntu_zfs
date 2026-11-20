@@ -74,6 +74,11 @@ jobs:
             echo "contabo_ssh_key = \"$(esc "$CONTABO_SSH_KEY")\""
             echo "contabo_arc_max_bytes = \"$(esc "$CONTABO_ARC_MAX_BYTES")\""
           } > "templates/${{ matrix.ubuntu-release }}/contabo.ci.auto.pkrvars.hcl"
+      - name: Validate Packer template
+        run: |
+          cd "templates/${{ matrix.ubuntu-release }}"
+          packer init ./
+          packer validate ./
       - name: Build image ${{ matrix.ubuntu-release }}
         run: sudo ./build.sh ${{ matrix.ubuntu-release }}
       - name: Save artifacts

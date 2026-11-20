@@ -86,7 +86,7 @@ source "qemu" "ubuntu-24-contabo-zfs" {
   net_device                = "virtio-net"
   headless                  = true
   qemu_binary               = "qemu-system-x86_64"
-  ssh_timeout               = "30s"
+  ssh_timeout               = "10m"
   cd_files                  = ["./cloud-init/*"]
   cd_label                  = "cidata"
   ssh_password              = "ubuntu"
