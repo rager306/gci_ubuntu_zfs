@@ -2,3 +2,4 @@
 *.qcow2-1
 .zcode/
 templates/*/contabo.auto.pkrvars.hcl
+.mimosa/
