@@ -84,7 +84,7 @@ to `contabo.auto.pkrvars.hcl` and fill in the real values from the Contabo panel
 | `contabo_hostname` | `vmi1234567` | Hostname baked into the image |
 | `contabo_ssh_key` | ed25519 key | Public key allowed to log in as root |
 | `contabo_root_password` | *(empty)* | Optional root password for the Contabo VNC console; empty = keep locked (SSH stays key-only either way) |
-| `contabo_arc_max_bytes` | `12884901888` (12 GiB) | ZFS ARC limit |
+| `contabo_arc_max_bytes` | `25769803776` (24 GiB) | ZFS ARC limit (~1/3 of host RAM is a solid default) |
 
 Examples use RFC 5737/3849 documentation ranges — real values never belong in the repository.
 

@@ -24,5 +24,5 @@ contabo_ssh_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@example.com"
 # Empty = root password stays locked (use the ubuntu console account instead).
 contabo_root_password = ""
 
-# ZFS ARC limit in bytes
-contabo_arc_max_bytes = "12884901888"
+# ZFS ARC limit in bytes (~1/3 of host RAM is a solid default)
+contabo_arc_max_bytes = "25769803776"
